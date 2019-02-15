@@ -10,3 +10,5 @@ saved_models/
 dataset/glove/
 dataset/vocab/
 
+dataset/tacred/*
+!dataset/tacred/README.md

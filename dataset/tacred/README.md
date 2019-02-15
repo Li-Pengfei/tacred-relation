@@ -1,0 +1,114 @@
+The TAC Relation Extraction Dataset (TACRED)
+============================================
+
+This document contains basic information about the Stanford TACRED dataset (v1.1). TACRED is a large-scale relation extraction dataset with 106,264 examples built over newswire and web text. It uses the TAC KBP relation types – see [the guidelines](https://tac.nist.gov/2017/KBP/ColdStart/guidelines.html) – and uses available human annotations from TAC KBP produced by LDC annotators, but is otherwise created mainly via crowdsourcing. For detailed information about the dataset and benchmark results, please refer to [the TACRED paper](https://nlp.stanford.edu/pubs/zhang2017tacred.pdf).
+
+
+Dataset Collection
+------------------
+
+The dataset was created based on query entities and annotated system responses in the yearly TAC Knowledge Base Population (TAC KBP) Slot Filling evaluations. In each year of the evaluation (2009–2014), 100 entities (people or organizations) were given as queries (i.e., subjects), for which participating systems should find associated relations and object entities. All sentences judged in the TAC KBP evaluation and a sampling of other sentences that contain the query entities in the evaluation corpus form the TACRED corpus. Each sentence was crowd-annotated using Mechanical Turk, where each turk annotator was asked to annotate the subject and object entity spans, and the corresponding relation (out of the 41 possible relation types and a special `no_relation` type). Note that negative examples (i.e., examples with `no_relation` type) encountered in this annotation process are all included in the dataset, resulting in a negative ratio of about 79.5%. This high ratio of `no_relation` is intended to make the corpus faithful to the nature of the task, where true positives are relatively rare. Nevertheless, in most cases this ratio still under-represents the true frequency of `no_relation`, due to the sampling used.
+
+For more information on the collection and validation of the dataset, please refer to the paper (also available in the docs folder).
+
+
+Dataset Statistics
+------------------
+
+The dataset is stratified into training, development and test splits. To encourage statistical models to learn entity and topic-agnostic features, the stratification is done based on the year in which the subject entity was used in a TAC KBP challenge. Information for each split is listed as follows:
+
+| Split | # Examples | TAC KBP Year |
+| ----- |    -----   |    -----     |
+| Train | 68,124     | 2009 - 2012  |
+| Dev   | 22,631     | 2013         |
+| Test  | 15,509     | 2014         |
+
+Please note that the number of examples in this TACRED v1.1 release is different from (less than) the number reported in the original EMNLP 2017 paper. Version 1.1 corrects duplications of examples that were present in the original (unreleased) corpus. The included revised paper has accurate numbers and experimental results for the v1.1 corpus. 
+
+For detailed per-relation statistics, please refer to the `docs/tacred_stats.tsv` file.
+
+
+Directory Structure
+-------------------
+
+The structure of this release is:
+
+- `data`: data directory
+    - `conll`: the annotated data in an ad hoc CoNLL (tab-separated column) format.
+    - `json`: the annotated data in a JSON format.
+    - `gold`: files that contain gold relation annotations, with one annotation per line.
+- `docs`: a directory containing documentation and related publications about the dataset.
+- `tools`: a directory containing scripts for converting the data from CoNLL format to JSON format or scoring predictions.
+
+
+Data Format
+-----------
+
+### CoNLL format
+
+We provide the data in a format similar to that used in the CoNLL shared tasks. For each example, the first line is in the format of `# id=ID docid=DOCID reln=RELATION`, where `ID` is a unique hash code of the current example, `DOCID` is the LDC document id from which this example was drawn (an id that can be found in the LDC2018T03 source corpus), and `RELATION` is the relation type. Each following line consists of the following tab-separated fields:
+
+- `index`: 1-based index of the current token.
+- `token`: the token sequence in the sentence.
+- `subj`: whether the current token is part of the subject of the relation (denoted by `SUBJECT`) or not (denoted by `_`).
+- `subj_type`: named entity type of the current token, if it is part of the subject (otherwise it is `_`).
+- `obj`: whether the current token is part of the object of the relation (`OBJECT`) or not (`_`).
+- `obj_type`: named entity type of the current token, if it is part of the object (otherwise it is `_`).
+- `stanford_pos`: part-of-speech tag of the current token.
+- `stanford_ner`: named entity tag of the current token.
+- `stanford_deprel`: dependency relation of the current token to its head token.
+- `stanford_head`: 1-based index of the dependency head of the current token.
+
+The last 4 fields were generated by running [Stanford CoreNLP v3.7.0](https://stanfordnlp.github.io/CoreNLP/) on the token sequence of each example. The part-of-speech tags follow the Penn Treebank tag set. The named entity types include fine-grained types suitable for TAC KBP (produced with the CoreNLP `regexner` annotator). 17 types are found in the data (CAUSE\_OF\_DEATH, CITY, COUNTRY, CRIMINAL\_CHARGE, DATE, DURATION, IDEOLOGY, LOCATION, MISC, NATIONALITY, NUMBER, ORGANIZATION, PERSON, RELIGION, STATE\_OR\_PROVINCE, TITLE, URL). Dependency relations are Universal Dependencies v1 relations, with the head of the sentence given deprel `ROOT` and head index 0.
+
+### JSON format
+
+We also provide the annotated data in a JSON format that can be directly loaded via the Python `json` library. The JSON data files use the same fields as the CoNLL format files, except that they use `subj_start` and `subj_end` instead of the `subj` field and similarly for the `obj` field.
+
+Alternatively the JSON format files can also be created from the CoNLL files by running the following script from the root directory:
+
+```
+python3 tools/generate_json.py data/conll data/json
+```
+
+
+Scoring
+-------
+
+In addition to the original dataset files, gold relation labels in each dataset split are also stored in the `gold/` folder. To score system predictions using micro-averaged precision, recall and F1 metrics, the following script can be run:
+
+```
+python3 tools/score.py GOLD_FILE PRED_FILE
+```
+
+Here the `PRED_FILE` must be in the same format as the gold file, with one relation per line. Detailed per-relation scores will be printed along with the overall scores.
+
+
+LDC Corpora
+-----------
+
+The following LDC corpora were used in the creation of the TACRED dataset:
+
+| Corpus ID  | Description |
+|   -----    |    -----    |
+| LDC2018T03 | TAC KBP Comprehensive English Source Corpora 2009-2014 |
+| LDC2018T22 | TAC KBP English Regular Slot Filling - Comprehensive Training and Evaluation Data 2009-2014 |
+
+All sentences are taken from LDC2018T03. The relation judgments in LDC2018T22 were used for sentences where they were available.
+
+
+Citation
+--------
+
+Please cite the following paper if you use TACRED in your research:
+
+```
+@inproceedings{zhang2017tacred,
+ author = {Zhang, Yuhao and Zhong, Victor and Chen, Danqi and Angeli, Gabor and Manning, Christopher D.},
+ booktitle = {Proceedings of the 2017 Conference on Empirical Methods in Natural Language Processing (EMNLP 2017)},
+ title = {Position-aware Attention and Supervised Data Improve Slot Filling},
+ url = {https://nlp.stanford.edu/pubs/zhang2017tacred.pdf},
+ pages = {35--45},
+ year = {2017}
+}
+```
