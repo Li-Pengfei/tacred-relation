@@ -19,6 +19,9 @@ from utils import scorer, constant, helper
 from utils.vocab import Vocab
 
 parser = argparse.ArgumentParser()
+
+parser.add_argument('--k_size', type=int, default=3, help='Convolutional kernel size')
+
 parser.add_argument('--data_dir', type=str, default='dataset/tacred')
 parser.add_argument('--vocab_dir', type=str, default='dataset/vocab')
 parser.add_argument('--emb_dim', type=int, default=300, help='Word embedding dimension.')

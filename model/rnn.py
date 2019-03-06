@@ -15,7 +15,7 @@ class RelationModel(object):
     """ A wrapper class for the training and evaluation of models. """
     def __init__(self, opt, emb_matrix=None):
         self.opt = opt
-        self.model = PositionAwareRNN(opt, emb_matrix)
+        self.model = PositionAwareCNN(opt, emb_matrix)
         self.criterion = nn.CrossEntropyLoss()
         self.parameters = [p for p in self.model.parameters() if p.requires_grad]
         if opt['cuda']:
@@ -91,11 +91,11 @@ class RelationModel(object):
         self.model.load_state_dict(checkpoint['model'])
         self.opt = checkpoint['config']
 
-class PositionAwareRNN(nn.Module):
+class PositionAwareCNN(nn.Module):
     """ A sequence model for relation extraction. """
 
     def __init__(self, opt, emb_matrix=None):
-        super(PositionAwareRNN, self).__init__()
+        super(PositionAwareCNN, self).__init__()
         self.drop = nn.Dropout(opt['dropout'])
         self.emb = nn.Embedding(opt['vocab_size'], opt['emb_dim'], padding_idx=constant.PAD_ID)
         if opt['pos_dim'] > 0:
@@ -106,13 +106,19 @@ class PositionAwareRNN(nn.Module):
                     padding_idx=constant.PAD_ID)
         
         input_size = opt['emb_dim'] + opt['pos_dim'] + opt['ner_dim']
+        ######################################################################
         self.rnn = nn.LSTM(input_size, opt['hidden_dim'], opt['num_layers'], batch_first=True,\
                 dropout=opt['dropout'])
         self.linear = nn.Linear(opt['hidden_dim'], opt['num_class'])
+        ######################################################################
+        self.conv1 = nn.Conv1d(input_size, opt['hidden_dim'], opt['k_size'], padding=int((opt['k_size']-1)/2))
+        self.linear1 = nn.Linear(opt['hidden_dim']*2, opt['num_class'])
+        self.pooling = nn.MaxPool1d(60)
 
         if opt['attn']:
             self.attn_layer = layers.PositionAwareAttention(opt['hidden_dim'],
                     opt['hidden_dim'], 2*opt['pe_dim'], opt['attn_dim'])
+            
             self.pe_emb = nn.Embedding(constant.MAX_LEN * 2 + 1, opt['pe_dim'])
 
         self.opt = opt
@@ -171,13 +177,20 @@ class PositionAwareRNN(nn.Module):
         inputs = self.drop(torch.cat(inputs, dim=2)) # add dropout to input
         input_size = inputs.size(2)
         
+        ######################################################################
         # rnn
         h0, c0 = self.zero_state(batch_size)
-        inputs = nn.utils.rnn.pack_padded_sequence(inputs, seq_lens, batch_first=True)
-        outputs, (ht, ct) = self.rnn(inputs, (h0, c0))
-        outputs, output_lens = nn.utils.rnn.pad_packed_sequence(outputs, batch_first=True)
+        inputs_rnn = nn.utils.rnn.pack_padded_sequence(inputs, seq_lens, batch_first=True)
+        outputs_rnn, (ht, ct) = self.rnn(inputs_rnn, (h0, c0))
+        outputs_rnn, output_rnn_lens = nn.utils.rnn.pad_packed_sequence(outputs_rnn, batch_first=True)
         hidden = self.drop(ht[-1,:,:]) # get the outmost layer h_n
-        outputs = self.drop(outputs)
+        outputs_rnn = self.drop(outputs_rnn)
+        ######################################################################
+        # cnn
+        outputs_cnn = self.conv1(inputs.transpose(1,2))
+        outputs_cnn = torch.transpose(outputs_cnn, 1, 2)
+        outputs_cnn = self.drop(outputs_cnn)
+        query = self.pooling(outputs_cnn.transpose(1,2))
         
         # attention
         if self.opt['attn']:
@@ -186,11 +199,25 @@ class PositionAwareRNN(nn.Module):
             subj_pe_inputs = self.pe_emb(subj_pos + constant.MAX_LEN)
             obj_pe_inputs = self.pe_emb(obj_pos + constant.MAX_LEN)
             pe_features = torch.cat((subj_pe_inputs, obj_pe_inputs), dim=2)
-            final_hidden = self.attn_layer(outputs, masks, hidden, pe_features)
+# =============================================================================
+            final_hidden = self.attn_layer(outputs_rnn, masks, hidden, pe_features)
+# =============================================================================
+            final_query = self.attn_layer(outputs_cnn, masks, query, pe_features)
         else:
+# =============================================================================
             final_hidden = hidden
+# =============================================================================
+            final_query = query
 
-        logits = self.linear(final_hidden)
-        return logits, final_hidden
+# =============================================================================
+#         logits = self.linear(final_hidden)
+#         return logits, final_hidden
+# =============================================================================
+# =============================================================================
+#         logits = self.linear(final_query)
+#         return logits, final_query
+# =============================================================================
+        final = torch.cat((final_hidden, final_query), 1)
+        logits = self.linear1(final)
+        return logits, final
     
-
