@@ -99,7 +99,7 @@ class DecisionLevelAttention(nn.Module):
     where x is the input, T is context vector
     """
 
-    def __init__(self, input_size, attn_size, opt):
+    def __init__(self, input_size, attn_size):
         super(DecisionLevelAttention, self).__init__()
 
         self.opt = opt
@@ -158,6 +158,8 @@ class DecisionLevelAttention(nn.Module):
 
 
 
+
+
 class PositionAwareCNN(nn.Module):
     """ A sequence model for relation extraction. """
 
@@ -185,6 +187,8 @@ class PositionAwareCNN(nn.Module):
         if opt['attn']:
             self.attn_layer = layers.PositionAwareAttention(opt['hidden_dim'],
                     opt['hidden_dim'], 2*opt['pe_dim'], opt['attn_dim'])
+            # self.attn_layer2 = layers.PositionAwareAttention(opt['hidden_dim'],
+            #         opt['hidden_dim'], 2*opt['pe_dim'], opt['attn_dim'])
             
             self.pe_emb = nn.Embedding(constant.MAX_LEN * 2 + 1, opt['pe_dim'])
 
