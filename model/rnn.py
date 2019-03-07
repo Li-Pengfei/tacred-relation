@@ -91,6 +91,73 @@ class RelationModel(object):
         self.model.load_state_dict(checkpoint['model'])
         self.opt = checkpoint['config']
 
+
+class DecisionLevelAttention(nn.Module):
+    """
+    A decision-level attention layer where the attention weight is
+    a = T' . tanh(Wx + b), then softmax 
+    where x is the input, T is context vector
+    """
+
+    def __init__(self, input_size, attn_size, opt):
+        super(DecisionLevelAttention, self).__init__()
+
+        self.opt = opt
+        self.input_size = input_size
+        self.attn_size = attn_size
+        self.ulinear = nn.Linear(input_size, attn_size, bias=True)
+        self.vlinear = nn.Linear(input_size, attn_size, bias=True)
+        # if opt['ner_dim_subj_obj'] > 0:
+        #     self.w1linear = nn.Linear(opt['ner_dim_subj_obj'], attn_size, bias=True)
+        #     self.w2linear = nn.Linear(opt['ner_dim_subj_obj'], attn_size, bias=True)
+        self.tlinear = nn.Linear(attn_size, 1, bias=False)
+        self.init_weights()
+
+    def init_weights(self):
+        self.ulinear.weight.data.normal_(std=0.001).to("cuda")
+        self.vlinear.weight.data.normal_(std=0.001).to("cuda")
+        # if self.opt['ner_dim_subj_obj'] > 0:
+        #     self.w1linear.weight.data.normal_(std=0.001).to("cuda")
+        #     self.w2linear.weight.data.normal_(std=0.001).to("cuda")
+        self.tlinear.weight.data.zero_().to("cuda")  # use zero to give uniform attention at the beginning
+
+    def forward(self, inputs):
+        """
+        inputs = [CNN channel output, RNN channel output]
+        each input element has shape: batch_size X feature_dim
+        """
+        batch_size = inputs[0].size()[0]
+
+        # if self.opt['ner_dim_subj_obj'] > 0:
+        #     x1, x2,subj_ner, obj_ner = inputs
+        #     x1_proj = torch.tanh(self.ulinear(x1))
+        #     x2_proj = torch.tanh(self.vlinear(x2))
+        #     subj_ner_proj = torch.tanh(self.w1linear(subj_ner))
+        #     obj_ner_proj = torch.tanh(self.w2linear(obj_ner))
+
+        #     hiddens = torch.cat((x1_proj.unsqueeze(1), x2_proj.unsqueeze(1),
+        #         subj_ner_proj.unsqueeze(1), obj_ner_proj.unsqueeze(1)), dim=1)  # batch_size X 4 X attn_size
+        #     scores = [self.tlinear(x1_proj), self.tlinear(x2_proj),
+        #             self.tlinear(subj_ner_proj),self.tlinear(obj_ner_proj)]
+        # else:
+
+        x1, x2 = inputs
+        x1_proj = torch.tanh(self.ulinear(x1))
+        x2_proj = torch.tanh(self.vlinear(x2))
+        hiddens = torch.cat((x1_proj.unsqueeze(1), x2_proj.unsqueeze(1)), dim=1)
+        scores = [self.tlinear(x1_proj), self.tlinear(x2_proj)]
+
+        scores = torch.cat(scores, dim=1)
+
+        weights = F.softmax(scores, dim=-1)  # batch_size X 4
+
+        outputs = weights.unsqueeze(1).bmm(hiddens).squeeze(1)   # batch_size X attn_size
+        # add activation function
+        # outputs = torch.tanh(outputs)
+        return outputs
+
+
+
 class PositionAwareCNN(nn.Module):
     """ A sequence model for relation extraction. """
 
