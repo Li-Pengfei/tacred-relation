@@ -99,14 +99,16 @@ class DecisionLevelAttention(nn.Module):
     where x is the input, T is context vector
     """
 
-    def __init__(self, input_size, attn_size):
+    def __init__(self, input_size, attn_size, opt):
         super(DecisionLevelAttention, self).__init__()
 
         self.opt = opt
         self.input_size = input_size
         self.attn_size = attn_size
-        self.ulinear = nn.Linear(input_size, attn_size, bias=True)
-        self.vlinear = nn.Linear(input_size, attn_size, bias=True)
+#        self.ulinear = nn.Linear(input_size, attn_size, bias=True)
+#        self.vlinear = nn.Linear(input_size, attn_size, bias=True)
+        self.ulinear = nn.Linear(opt['hidden_dim_cnn']*2, attn_size, bias=True)
+        self.vlinear = nn.Linear(opt['hidden_dim'], attn_size, bias=True)
         # if opt['ner_dim_subj_obj'] > 0:
         #     self.w1linear = nn.Linear(opt['ner_dim_subj_obj'], attn_size, bias=True)
         #     self.w2linear = nn.Linear(opt['ner_dim_subj_obj'], attn_size, bias=True)
@@ -114,12 +116,15 @@ class DecisionLevelAttention(nn.Module):
         self.init_weights()
 
     def init_weights(self):
-        self.ulinear.weight.data.normal_(std=0.001).to("cuda")
-        self.vlinear.weight.data.normal_(std=0.001).to("cuda")
+#        self.ulinear.weight.data.normal_(std=0.001).to("cuda")
+#        self.vlinear.weight.data.normal_(std=0.001).to("cuda")
+        self.ulinear.weight.data.normal_(std=0.001)
+        self.vlinear.weight.data.normal_(std=0.001)
         # if self.opt['ner_dim_subj_obj'] > 0:
         #     self.w1linear.weight.data.normal_(std=0.001).to("cuda")
         #     self.w2linear.weight.data.normal_(std=0.001).to("cuda")
-        self.tlinear.weight.data.zero_().to("cuda")  # use zero to give uniform attention at the beginning
+#        self.tlinear.weight.data.zero_().to("cuda")  # use zero to give uniform attention at the beginning
+        self.tlinear.weight.data.zero_()
 
     def forward(self, inputs):
         """
@@ -175,20 +180,27 @@ class PositionAwareCNN(nn.Module):
                     padding_idx=constant.PAD_ID)
         
         input_size = opt['emb_dim'] + opt['pos_dim'] + opt['ner_dim']
-        ######################################################################
+# =============================================================================
         self.rnn = nn.LSTM(input_size, opt['hidden_dim'], opt['num_layers'], batch_first=True,\
                 dropout=opt['dropout'])
-        self.linear = nn.Linear(opt['hidden_dim'], opt['num_class'])
-        ######################################################################
-        self.conv1 = nn.Conv1d(input_size, opt['hidden_dim'], opt['k_size'], padding=int((opt['k_size']-1)/2))
-        self.linear1 = nn.Linear(opt['hidden_dim']*2, opt['num_class'])
-        self.pooling = nn.MaxPool1d(60)
+#        self.linear = nn.Linear(opt['hidden_dim'], opt['num_class'])
+# =============================================================================
+#        self.conv1 = nn.Conv1d(input_size, opt['hidden_dim_cnn'], opt['k_size'], padding=int((opt['k_size']-1)/2))
+        self.conv1 = nn.Conv1d(input_size, opt['hidden_dim_cnn'], opt['k_size'])
+        self.conv2 = nn.Conv1d(input_size, opt['hidden_dim_cnn'], opt['k_size2'])
+#        self.norm = nn.BatchNorm1d(opt['hidden_dim_cnn'])
+        self.activation = nn.ReLU()
+#        self.linear2 = nn.Linear(opt['hidden_dim_cnn'], opt['num_class'])
+        self.linear3 = nn.Linear(opt['hidden_dim']+opt['hidden_dim_cnn']*2, opt['num_class'])
+#        self.pooling = nn.MaxPool1d(200)
+        
+        self.combine = DecisionLevelAttention(opt['attn_dim'], opt['attn_dim'], opt)
 
         if opt['attn']:
             self.attn_layer = layers.PositionAwareAttention(opt['hidden_dim'],
                     opt['hidden_dim'], 2*opt['pe_dim'], opt['attn_dim'])
-            # self.attn_layer2 = layers.PositionAwareAttention(opt['hidden_dim'],
-            #         opt['hidden_dim'], 2*opt['pe_dim'], opt['attn_dim'])
+            self.attn_layer2 = layers.PositionAwareAttention(opt['hidden_dim_cnn']*2,
+                    opt['hidden_dim_cnn']*2, 2*opt['pe_dim'], opt['attn_dim'])
             
             self.pe_emb = nn.Embedding(constant.MAX_LEN * 2 + 1, opt['pe_dim'])
 
@@ -209,8 +221,12 @@ class PositionAwareCNN(nn.Module):
         if self.opt['ner_dim'] > 0:
             self.ner_emb.weight.data[1:,:].uniform_(-1.0, 1.0)
 
-        self.linear.bias.data.fill_(0)
-        init.xavier_uniform_(self.linear.weight, gain=1) # initialize linear layer
+#        self.linear.bias.data.fill_(0)
+#        init.xavier_uniform_(self.linear.weight, gain=1) # initialize linear layer
+#        self.linear2.bias.data.fill_(0)
+#        init.xavier_uniform_(self.linear2.weight, gain=1)
+        self.linear3.bias.data.fill_(0)
+        init.xavier_uniform_(self.linear3.weight, gain=1)
         if self.opt['attn']:
             self.pe_emb.weight.data.uniform_(-1.0, 1.0)
 
@@ -237,6 +253,7 @@ class PositionAwareCNN(nn.Module):
         words, masks, pos, ner, deprel, subj_pos, obj_pos = inputs # unpack
         seq_lens = list(masks.data.eq(constant.PAD_ID).long().sum(1).squeeze())
         batch_size = words.size()[0]
+#        print(max(seq_lens).item())
         
         # embedding lookup
         word_inputs = self.emb(words)
@@ -248,20 +265,35 @@ class PositionAwareCNN(nn.Module):
         inputs = self.drop(torch.cat(inputs, dim=2)) # add dropout to input
         input_size = inputs.size(2)
         
-        ######################################################################
-        # rnn
+#        # rnn
         h0, c0 = self.zero_state(batch_size)
         inputs_rnn = nn.utils.rnn.pack_padded_sequence(inputs, seq_lens, batch_first=True)
         outputs_rnn, (ht, ct) = self.rnn(inputs_rnn, (h0, c0))
         outputs_rnn, output_rnn_lens = nn.utils.rnn.pad_packed_sequence(outputs_rnn, batch_first=True)
         hidden = self.drop(ht[-1,:,:]) # get the outmost layer h_n
         outputs_rnn = self.drop(outputs_rnn)
-        ######################################################################
+
         # cnn
-        outputs_cnn = self.conv1(inputs.transpose(1,2))
+        inputs1 = F.pad(inputs.transpose(1,2), (3,3))
+        inputs2 = F.pad(inputs.transpose(1,2), (0,1))
+#        outputs_cnn = self.conv1(inputs.transpose(1,2))
+        outputs_cnn = self.conv1(inputs1)
+        outputs_cnn2 = self.conv2(inputs2)
+#        outputs_cnn = self.norm(outputs_cnn)
+#        outputs_cnn = F.layer_norm(outputs_cnn, outputs_cnn.shape)
+        outputs_cnn = self.activation(outputs_cnn)
+        outputs_cnn2 = self.activation(outputs_cnn2)
         outputs_cnn = torch.transpose(outputs_cnn, 1, 2)
+        outputs_cnn2 = torch.transpose(outputs_cnn2, 1, 2)
         outputs_cnn = self.drop(outputs_cnn)
-        query = self.pooling(outputs_cnn.transpose(1,2))
+        outputs_cnn2 = self.drop(outputs_cnn2)
+#        query = self.pooling(outputs_cnn.transpose(1,2))
+#        query2 = self.pooling(outputs_cnn2.transpose(1,2))
+        query = F.max_pool1d(outputs_cnn.transpose(1,2), max(seq_lens).item())
+        query2 = F.max_pool1d(outputs_cnn2.transpose(1,2), max(seq_lens).item())
+        
+        outputs_cnn = torch.cat((outputs_cnn, outputs_cnn2), dim=2)
+        query = torch.cat((query, query2), dim=1)
         
         # attention
         if self.opt['attn']:
@@ -270,25 +302,24 @@ class PositionAwareCNN(nn.Module):
             subj_pe_inputs = self.pe_emb(subj_pos + constant.MAX_LEN)
             obj_pe_inputs = self.pe_emb(obj_pos + constant.MAX_LEN)
             pe_features = torch.cat((subj_pe_inputs, obj_pe_inputs), dim=2)
-# =============================================================================
             final_hidden = self.attn_layer(outputs_rnn, masks, hidden, pe_features)
-# =============================================================================
-            final_query = self.attn_layer(outputs_cnn, masks, query, pe_features)
+            final_query = self.attn_layer2(outputs_cnn, masks, query, pe_features)
         else:
-# =============================================================================
             final_hidden = hidden
-# =============================================================================
             final_query = query
 
 # =============================================================================
-#         logits = self.linear(final_hidden)
-#         return logits, final_hidden
+#        logits = self.linear(final_hidden)
+#        return logits, final_hidden
 # =============================================================================
+#        logits = self.linear2(final_query)
+#        return logits, final_query
 # =============================================================================
-#         logits = self.linear(final_query)
-#         return logits, final_query
-# =============================================================================
-        final = torch.cat((final_hidden, final_query), 1)
-        logits = self.linear1(final)
+        final = torch.cat((final_hidden, final_query),1)
+        logits = self.linear3(final)
         return logits, final
-    
+# =============================================================================
+#        final = [final_query, final_hidden]
+#        final = self.combine(final)
+#        logits = self.linear(final)
+#        return logits, final
