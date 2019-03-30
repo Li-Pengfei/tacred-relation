@@ -35,14 +35,20 @@ class RelationModel(object):
         # step forward
         self.model.train()
         self.optimizer.zero_grad()
-        logits, _ = self.model(inputs)
+#        logits, _ = self.model(inputs)
+        logits, logits2 = self.model(inputs)
         loss = self.criterion(logits, labels)
+        loss2 = self.criterion(logits2, labels)
         
         # backward
-        loss.backward()
+        loss.backward(retain_graph=True)
+#        loss1.backward(retain_graph=True)
+        loss2.backward(retain_graph=True)
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.opt['max_grad_norm'])
         self.optimizer.step()
         loss_val = loss.data.item()
+        loss2_val = loss2.data.item()
+        loss_val = (loss_val + loss2_val)/2
         return loss_val
 
     def predict(self, batch, unsort=True):
@@ -58,9 +64,17 @@ class RelationModel(object):
 
         # forward
         self.model.eval()
-        logits, _ = self.model(inputs)
+#        logits, _ = self.model(inputs)
+        logits, logits2 = self.model(inputs)
         loss = self.criterion(logits, labels)
+        loss2 = self.criterion(logits2, labels)
         probs = F.softmax(logits, dim=1).data.cpu().numpy().tolist()
+        probs2 = F.softmax(logits2, dim=1).data.cpu().numpy().tolist()
+#        probs = (probs + probs2)/2
+#        probs = list(map(lambda x, y: (x+y)/2, probs, probs2))
+        probs = np.array(probs)
+        probs2 = np.array(probs2)
+        probs = ((probs + probs2)/2).tolist()
         predictions = np.argmax(logits.data.cpu().numpy(), axis=1).tolist()
         if unsort:
             _, predictions, probs = [list(t) for t in zip(*sorted(zip(orig_idx,\
@@ -105,10 +119,13 @@ class DecisionLevelAttention(nn.Module):
         self.opt = opt
         self.input_size = input_size
         self.attn_size = attn_size
+#        self.attn_size = 300
 #        self.ulinear = nn.Linear(input_size, attn_size, bias=True)
 #        self.vlinear = nn.Linear(input_size, attn_size, bias=True)
         self.ulinear = nn.Linear(opt['hidden_dim_cnn']*2, attn_size, bias=True)
         self.vlinear = nn.Linear(opt['hidden_dim'], attn_size, bias=True)
+#        self.mlinear = nn.Linear(opt['hidden_dim'], attn_size, bias=True)
+#        self.nlinear = nn.Linear(opt['hidden_dim'], attn_size, bias=True)
         # if opt['ner_dim_subj_obj'] > 0:
         #     self.w1linear = nn.Linear(opt['ner_dim_subj_obj'], attn_size, bias=True)
         #     self.w2linear = nn.Linear(opt['ner_dim_subj_obj'], attn_size, bias=True)
@@ -116,15 +133,13 @@ class DecisionLevelAttention(nn.Module):
         self.init_weights()
 
     def init_weights(self):
-#        self.ulinear.weight.data.normal_(std=0.001).to("cuda")
-#        self.vlinear.weight.data.normal_(std=0.001).to("cuda")
-        self.ulinear.weight.data.normal_(std=0.001)
-        self.vlinear.weight.data.normal_(std=0.001)
+        self.ulinear.weight.data.normal_(std=0.001).to("cuda")
+        self.vlinear.weight.data.normal_(std=0.001).to("cuda")
+#        self.mlinear.weight.data.normal_(std=0.001).to("cuda")
         # if self.opt['ner_dim_subj_obj'] > 0:
         #     self.w1linear.weight.data.normal_(std=0.001).to("cuda")
         #     self.w2linear.weight.data.normal_(std=0.001).to("cuda")
-#        self.tlinear.weight.data.zero_().to("cuda")  # use zero to give uniform attention at the beginning
-        self.tlinear.weight.data.zero_()
+        self.tlinear.weight.data.zero_().to("cuda")  # use zero to give uniform attention at the beginning
 
     def forward(self, inputs):
         """
@@ -146,11 +161,16 @@ class DecisionLevelAttention(nn.Module):
         #             self.tlinear(subj_ner_proj),self.tlinear(obj_ner_proj)]
         # else:
 
-        x1, x2 = inputs
-        x1_proj = torch.tanh(self.ulinear(x1))
-        x2_proj = torch.tanh(self.vlinear(x2))
-        hiddens = torch.cat((x1_proj.unsqueeze(1), x2_proj.unsqueeze(1)), dim=1)
-        scores = [self.tlinear(x1_proj), self.tlinear(x2_proj)]
+        x1, x4 = inputs
+#        x1_proj = torch.tanh(self.ulinear(x1))
+#        x2_proj = torch.tanh(self.vlinear(x2))
+#        x3_proj = torch.tanh(self.mlinear(x3))
+        x1_proj = F.relu(self.ulinear(x1))
+#        x2_proj = F.relu(self.ulinear(x2))
+#        x3_proj = F.relu(self.ulinear(x3))
+        x4_proj = F.relu(self.vlinear(x4))
+        hiddens = torch.cat((x1_proj.unsqueeze(1), x4_proj.unsqueeze(1)), dim=1)
+        scores = [self.tlinear(x1_proj), self.tlinear(x4_proj)]
 
         scores = torch.cat(scores, dim=1)
 
@@ -158,7 +178,8 @@ class DecisionLevelAttention(nn.Module):
 
         outputs = weights.unsqueeze(1).bmm(hiddens).squeeze(1)   # batch_size X attn_size
         # add activation function
-        # outputs = torch.tanh(outputs)
+#        outputs = torch.tanh(outputs)
+#        outputs = F.relu(outputs)
         return outputs
 
 
@@ -183,24 +204,29 @@ class PositionAwareCNN(nn.Module):
 # =============================================================================
         self.rnn = nn.LSTM(input_size, opt['hidden_dim'], opt['num_layers'], batch_first=True,\
                 dropout=opt['dropout'])
-#        self.linear = nn.Linear(opt['hidden_dim'], opt['num_class'])
+        self.linear = nn.Linear(opt['hidden_dim'], opt['num_class'])
 # =============================================================================
 #        self.conv1 = nn.Conv1d(input_size, opt['hidden_dim_cnn'], opt['k_size'], padding=int((opt['k_size']-1)/2))
         self.conv1 = nn.Conv1d(input_size, opt['hidden_dim_cnn'], opt['k_size'])
-        self.conv2 = nn.Conv1d(input_size, opt['hidden_dim_cnn'], opt['k_size2'])
+#        self.conv2 = nn.Conv1d(input_size, opt['hidden_dim_cnn'], opt['k_size2'])
+        self.conv3 = nn.Conv1d(input_size, opt['hidden_dim_cnn'], opt['k_size3'])
 #        self.norm = nn.BatchNorm1d(opt['hidden_dim_cnn'])
         self.activation = nn.ReLU()
+#        self.activation1 = nn.Tanh()
 #        self.linear2 = nn.Linear(opt['hidden_dim_cnn'], opt['num_class'])
-        self.linear3 = nn.Linear(opt['hidden_dim']+opt['hidden_dim_cnn']*2, opt['num_class'])
-#        self.pooling = nn.MaxPool1d(200)
+#        self.linear3 = nn.Linear(opt['hidden_dim']+opt['hidden_dim_cnn']*2, opt['num_class'])
+        self.linear3 = nn.Linear(opt['hidden_dim_cnn']*2, opt['num_class'])
         
-        self.combine = DecisionLevelAttention(opt['attn_dim'], opt['attn_dim'], opt)
+        #change attn_dim
+#        self.combine = DecisionLevelAttention(300, opt['attn_dim'], opt)
 
         if opt['attn']:
             self.attn_layer = layers.PositionAwareAttention(opt['hidden_dim'],
                     opt['hidden_dim'], 2*opt['pe_dim'], opt['attn_dim'])
             self.attn_layer2 = layers.PositionAwareAttention(opt['hidden_dim_cnn']*2,
                     opt['hidden_dim_cnn']*2, 2*opt['pe_dim'], opt['attn_dim'])
+            self.attn_layer3 = layers.PositionAwareAttention(opt['hidden_dim_cnn'],
+                    opt['hidden_dim_cnn'], 2*opt['pe_dim'], opt['attn_dim'])
             
             self.pe_emb = nn.Embedding(constant.MAX_LEN * 2 + 1, opt['pe_dim'])
 
@@ -221,8 +247,8 @@ class PositionAwareCNN(nn.Module):
         if self.opt['ner_dim'] > 0:
             self.ner_emb.weight.data[1:,:].uniform_(-1.0, 1.0)
 
-#        self.linear.bias.data.fill_(0)
-#        init.xavier_uniform_(self.linear.weight, gain=1) # initialize linear layer
+        self.linear.bias.data.fill_(0)
+        init.xavier_uniform_(self.linear.weight, gain=1) # initialize linear layer
 #        self.linear2.bias.data.fill_(0)
 #        init.xavier_uniform_(self.linear2.weight, gain=1)
         self.linear3.bias.data.fill_(0)
@@ -274,26 +300,33 @@ class PositionAwareCNN(nn.Module):
         outputs_rnn = self.drop(outputs_rnn)
 
         # cnn
-        inputs1 = F.pad(inputs.transpose(1,2), (3,3))
-        inputs2 = F.pad(inputs.transpose(1,2), (0,1))
+        inputs1 = F.pad(inputs.transpose(1,2), (0,1))
+#        inputs2 = F.pad(inputs.transpose(1,2), (0,3))
+        inputs3 = F.pad(inputs.transpose(1,2), (0,6))
 #        outputs_cnn = self.conv1(inputs.transpose(1,2))
         outputs_cnn = self.conv1(inputs1)
-        outputs_cnn2 = self.conv2(inputs2)
+#        outputs_cnn2 = self.conv2(inputs2)
+        outputs_cnn3 = self.conv3(inputs3)
 #        outputs_cnn = self.norm(outputs_cnn)
 #        outputs_cnn = F.layer_norm(outputs_cnn, outputs_cnn.shape)
         outputs_cnn = self.activation(outputs_cnn)
-        outputs_cnn2 = self.activation(outputs_cnn2)
+#        outputs_cnn2 = self.activation(outputs_cnn2)
+        outputs_cnn3 = self.activation(outputs_cnn3)
+        query = F.max_pool1d(outputs_cnn, max(seq_lens).item())
+#        query2 = F.max_pool1d(outputs_cnn2, max(seq_lens).item())
+        query3 = F.max_pool1d(outputs_cnn3, max(seq_lens).item())
         outputs_cnn = torch.transpose(outputs_cnn, 1, 2)
-        outputs_cnn2 = torch.transpose(outputs_cnn2, 1, 2)
-        outputs_cnn = self.drop(outputs_cnn)
-        outputs_cnn2 = self.drop(outputs_cnn2)
-#        query = self.pooling(outputs_cnn.transpose(1,2))
-#        query2 = self.pooling(outputs_cnn2.transpose(1,2))
-        query = F.max_pool1d(outputs_cnn.transpose(1,2), max(seq_lens).item())
-        query2 = F.max_pool1d(outputs_cnn2.transpose(1,2), max(seq_lens).item())
+#        outputs_cnn2 = torch.transpose(outputs_cnn2, 1, 2)
+        outputs_cnn3 = torch.transpose(outputs_cnn3, 1, 2)
+#        #dropout
+#        outputs_cnn = self.drop(outputs_cnn)
+#        outputs_cnn2 = self.drop(outputs_cnn2)
+#        outputs_cnn3 = self.drop(outputs_cnn3)
         
-        outputs_cnn = torch.cat((outputs_cnn, outputs_cnn2), dim=2)
-        query = torch.cat((query, query2), dim=1)
+        outputs_cnn = torch.cat((outputs_cnn, outputs_cnn3), dim=2)
+        query = torch.cat((query, query3), dim=1)
+#        outputs_cnn = torch.add(outputs_cnn, outputs_cnn3)
+#        query = torch.add(query, query3)
         
         # attention
         if self.opt['attn']:
@@ -304,22 +337,33 @@ class PositionAwareCNN(nn.Module):
             pe_features = torch.cat((subj_pe_inputs, obj_pe_inputs), dim=2)
             final_hidden = self.attn_layer(outputs_rnn, masks, hidden, pe_features)
             final_query = self.attn_layer2(outputs_cnn, masks, query, pe_features)
+#            final_query2 = self.attn_layer2(outputs_cnn2, masks, query2, pe_features)
+#            final_query3 = self.attn_layer2(outputs_cnn3, masks, query3, pe_features)
         else:
             final_hidden = hidden
             final_query = query
+#            final_query2 = query2
+#            final_query3 = query3
+#            final_query = torch.cat((query,query3),1)
 
 # =============================================================================
 #        logits = self.linear(final_hidden)
 #        return logits, final_hidden
 # =============================================================================
-#        logits = self.linear2(final_query)
+#        logits = self.linear3(final_query)
 #        return logits, final_query
+#        final = torch.cat((final_query,final_query2,final_query3),1)
+#        final = torch.cat((final_query,final_query2,final_hidden),1)
+#        logits = self.linear3(final)
+#        return logits, final
 # =============================================================================
-        final = torch.cat((final_hidden, final_query),1)
-        logits = self.linear3(final)
-        return logits, final
+#        final = torch.cat((final_hidden, final_query),1)
+        logits2 = self.linear3(final_query)
+        logits = self.linear(final_hidden)
+        return logits, logits2
 # =============================================================================
+#        final_cat = torch.cat((final_hidden, final_query),1)
 #        final = [final_query, final_hidden]
 #        final = self.combine(final)
-#        logits = self.linear(final)
+#        logits = self.linear3(final)
 #        return logits, final
