@@ -15,29 +15,34 @@ import torch.optim as optim
 
 from data.loader import DataLoader
 from model.rnn import RelationModel
+from model.cnn import RelationModel_CNN
 from utils import scorer, constant, helper
 from utils.vocab import Vocab
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument('--k_size', type=int, default=7, help='Convolutional kernel size')
-parser.add_argument('--k_size2', type=int, default=2, help='Convolutional kernel size2')
-#parser.add_argument('--k_size3', type=int, default=1)
+parser.add_argument('--k_size', type=int, default=1, help='Convolutional kernel size')
+#parser.add_argument('--k_size2', type=int, default=2, help='Convolutional kernel size2')
+#parser.add_argument('--k_size3', type=int, default=5)
+#parser.add_argument('--k_size4', type=int, default=5)
 
 parser.add_argument('--data_dir', type=str, default='dataset/tacred')
 parser.add_argument('--vocab_dir', type=str, default='dataset/vocab')
 parser.add_argument('--emb_dim', type=int, default=300, help='Word embedding dimension.')
 parser.add_argument('--ner_dim', type=int, default=30, help='NER embedding dimension.')
 parser.add_argument('--pos_dim', type=int, default=30, help='POS embedding dimension.')
-parser.add_argument('--hidden_dim', type=int, default=200, help='RNN hidden state size.')
+parser.add_argument('--hidden_dim', type=int, default=250, help='RNN hidden state size.')
 parser.add_argument('--hidden_dim_cnn', type=int, default=300)
-parser.add_argument('--num_layers', type=int, default=2, help='Num of RNN layers.')
+parser.add_argument('--num_layers', type=int, default=1, help='Num of RNN layers.')
 parser.add_argument('--dropout', type=float, default=0.5, help='Input and RNN dropout rate.')
+#parser.add_argument('--dropout_cnn', type=float, default=0.3)
+
 parser.add_argument('--word_dropout', type=float, default=0.04, help='The rate at which randomly set a word to UNK.')
 parser.add_argument('--topn', type=int, default=1e10, help='Only finetune top N embeddings.')
 parser.add_argument('--lower', dest='lower', action='store_true', help='Lowercase all words.')
 parser.add_argument('--no-lower', dest='lower', action='store_false')
 parser.set_defaults(lower=False)
+#parser.set_defaults(lower=True)
 
 parser.add_argument('--attn', dest='attn', action='store_true', help='Use attention layer.')
 parser.add_argument('--no-attn', dest='attn', action='store_false')
@@ -48,7 +53,7 @@ parser.add_argument('--pe_dim', type=int, default=30, help='Position encoding di
 parser.add_argument('--lr', type=float, default=1.0, help='Applies to SGD and Adagrad.')
 parser.add_argument('--lr_decay', type=float, default=0.9)
 parser.add_argument('--optim', type=str, default='sgd', help='sgd, adagrad, adam or adamax.')
-parser.add_argument('--num_epoch', type=int, default=80)
+parser.add_argument('--num_epoch', type=int, default=60)
 parser.add_argument('--batch_size', type=int, default=50)
 parser.add_argument('--max_grad_norm', type=float, default=5.0, help='Gradient clipping.')
 parser.add_argument('--log_step', type=int, default=20, help='Print log every k steps.')
@@ -103,7 +108,7 @@ file_logger = helper.FileLogger(model_save_dir + '/' + opt['log'], header="# epo
 helper.print_config(opt)
 
 # model
-model = RelationModel(opt, emb_matrix=emb_matrix)
+model = RelationModel_CNN(opt, emb_matrix=emb_matrix)
 
 id2label = dict([(v,k) for k,v in constant.LABEL_TO_ID.items()])
 dev_f1_history = []
@@ -163,4 +168,3 @@ for epoch in range(1, opt['num_epoch']+1):
     print("")
 
 print("Training ended with {} epochs.".format(epoch))
-
