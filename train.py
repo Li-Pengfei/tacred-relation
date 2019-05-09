@@ -21,8 +21,8 @@ from utils.vocab import Vocab
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument('--k_size', type=int, default=1, help='Convolutional kernel size')
-#parser.add_argument('--k_size2', type=int, default=2, help='Convolutional kernel size2')
+parser.add_argument('--k_size', type=int, default=2, help='Convolutional kernel size')
+parser.add_argument('--k_size2', type=int, default=3, help='Convolutional kernel size2')
 #parser.add_argument('--k_size3', type=int, default=5)
 #parser.add_argument('--k_size4', type=int, default=5)
 
@@ -31,9 +31,9 @@ parser.add_argument('--vocab_dir', type=str, default='dataset/vocab')
 parser.add_argument('--emb_dim', type=int, default=300, help='Word embedding dimension.')
 parser.add_argument('--ner_dim', type=int, default=30, help='NER embedding dimension.')
 parser.add_argument('--pos_dim', type=int, default=30, help='POS embedding dimension.')
-parser.add_argument('--hidden_dim', type=int, default=250, help='RNN hidden state size.')
-parser.add_argument('--hidden_dim_cnn', type=int, default=300)
-parser.add_argument('--num_layers', type=int, default=1, help='Num of RNN layers.')
+parser.add_argument('--hidden_dim', type=int, default=50, help='RNN hidden state size.')
+parser.add_argument('--hidden_dim_cnn', type=int, default=100)
+parser.add_argument('--num_layers', type=int, default=2, help='Num of RNN layers.')
 parser.add_argument('--dropout', type=float, default=0.5, help='Input and RNN dropout rate.')
 #parser.add_argument('--dropout_cnn', type=float, default=0.3)
 
@@ -48,12 +48,13 @@ parser.add_argument('--attn', dest='attn', action='store_true', help='Use attent
 parser.add_argument('--no-attn', dest='attn', action='store_false')
 parser.set_defaults(attn=True)
 parser.add_argument('--attn_dim', type=int, default=200, help='Attention size.')
+parser.add_argument('--attn_dim_cnn', type=int, default=100)
 parser.add_argument('--pe_dim', type=int, default=30, help='Position encoding dimension.')
 
 parser.add_argument('--lr', type=float, default=1.0, help='Applies to SGD and Adagrad.')
 parser.add_argument('--lr_decay', type=float, default=0.9)
 parser.add_argument('--optim', type=str, default='sgd', help='sgd, adagrad, adam or adamax.')
-parser.add_argument('--num_epoch', type=int, default=60)
+parser.add_argument('--num_epoch', type=int, default=35)
 parser.add_argument('--batch_size', type=int, default=50)
 parser.add_argument('--max_grad_norm', type=float, default=5.0, help='Gradient clipping.')
 parser.add_argument('--log_step', type=int, default=20, help='Print log every k steps.')
